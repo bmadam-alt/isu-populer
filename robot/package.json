@@ -1,0 +1,9 @@
+{
+  "name": "robot-studio-konten",
+  "private": true,
+  "type": "module",
+  "description": "Robot otomasi Studio Konten (dijalankan GitHub Actions)",
+  "dependencies": {
+    "playwright-core": "1.48.2"
+  }
+}

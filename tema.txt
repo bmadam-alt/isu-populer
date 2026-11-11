@@ -1,0 +1,5 @@
+# Daftar tema untuk laporan email harian.
+# Tulis satu tema per baris. Baris yang diawali # diabaikan.
+burnout
+kesehatan mental
+waktu senggang

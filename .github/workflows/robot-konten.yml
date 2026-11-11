@@ -1,0 +1,33 @@
+name: Robot Studio Konten
+
+on:
+  schedule:
+    # Dua kali per jam (menit ke-17 dan ke-47). GitHub sering melewatkan jadwal di akun gratis,
+    # jadi dua kesempatan per jam membuat robot lebih sering jalan. Robot tidak membuat konten ganda.
+    # Robot hanya bekerja bila mode di halaman Otomasi bukan Manual.
+    - cron: "17,47 * * * *"
+  workflow_dispatch: # tombol "Run workflow" untuk menjalankan sekarang
+
+concurrency:
+  group: robot-studio-konten
+  cancel-in-progress: false
+
+jobs:
+  robot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Pasang Playwright
+        working-directory: robot
+        run: npm install --no-audit --no-fund
+      - name: Jalankan robot
+        working-directory: robot
+        env:
+          SITUS_URL: ${{ vars.SITUS_URL || 'https://studio-konten.bmadam.workers.dev/' }}
+          ROBOT_EMAIL: ${{ secrets.ROBOT_EMAIL }}
+          ROBOT_PASSWORD: ${{ secrets.ROBOT_PASSWORD }}
+        run: node robot.mjs

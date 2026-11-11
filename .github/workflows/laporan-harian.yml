@@ -1,0 +1,52 @@
+name: Laporan isu populer harian
+
+on:
+  schedule:
+    # Dicek setiap jam (menit ke-7). laporan.py hanya mengirim email pada
+    # hari & jam yang dipilih di dashboard Pengaturan. Di luar jam itu, data isu
+    # untuk Studio Konten diperbarui tanpa email bila sudah berumur 6 jam.
+    - cron: "7 * * * *"
+  workflow_dispatch: # tombol "Run workflow" / "Kirim sekarang" = langsung kirim
+
+permissions:
+  contents: write # untuk menyimpan data/isu-terbaru.json (dibaca Studio Konten)
+
+jobs:
+  kirim-laporan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Buat dan kirim laporan
+        id: laporan
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          PENGATURAN: ${{ vars.PENGATURAN }}
+        run: python laporan.py
+      - name: Perkaya isu dengan isi artikel (bahan tulisan Studio Konten)
+        if: steps.laporan.outputs.baru == 'true' # hanya bila ada data baru
+        continue-on-error: true # bila gagal, data isu tetap disimpan tanpa artikel
+        timeout-minutes: 8
+        env:
+          ISU_KUNCI: ${{ secrets.ISU_KUNCI }} # teks artikel disimpan terenkripsi (repo publik)
+        run: python perkaya_isu.py
+      - name: Simpan data isu untuk Studio Konten
+        if: steps.laporan.outputs.baru == 'true'
+        run: |
+          if [ -f data/isu-terbaru.json ]; then
+            git config user.name "isu-populer-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/isu-terbaru.json
+            if git diff --cached --quiet; then
+              echo "Data isu tidak berubah."
+            else
+              git commit -m "Perbarui data isu terbaru"
+              git pull --rebase --autostash
+              git push
+            fi
+          fi
