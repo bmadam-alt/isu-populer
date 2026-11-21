@@ -15,6 +15,8 @@ Variabel lingkungan:
     JUMLAH_ISU          default 5 isu per tema
     SEGARKAN_JAM        default 6: di luar jam kirim, data isu untuk Studio Konten
                         diperbarui (tanpa email) bila sudah setua ini
+    KIRIM_EMAIL         "tidak" = buat data isu baru tanpa mengirim email (dipakai tombol
+                        "Perbarui isu sekarang" di Studio Konten)
 """
 
 from __future__ import annotations
@@ -268,6 +270,10 @@ def main() -> None:
             print(f"Tidak mengirim email: {alasan} Data isu diperbarui"
                   + (f" (umur sebelumnya {umur:.1f} jam)." if umur is not None else "."))
             kirim = False
+    # Permintaan "Perbarui isu sekarang" dari Studio Konten boleh tanpa email (data isu saja)
+    if os.environ.get("KIRIM_EMAIL", "").strip().lower() in ("tidak", "0", "false", "no"):
+        print("Diminta tanpa email: data isu diperbarui, email tidak dikirim.")
+        kirim = False
 
     themes = cfg["tema"]
     if not themes:
