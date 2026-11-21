@@ -25,12 +25,15 @@ import base64
 import hashlib
 import hmac
 import html
+import http.client
 import json
 import os
 import secrets
 import re
+import ssl
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -52,10 +55,81 @@ TOLAK_BARIS = re.compile(
     r"google news|editor:|penulis:|reporter:|sumber foto|^foto:", re.I)
 
 
+def alamat_publik(url: str) -> bool:
+    """Hanya http/https ke host yang semua alamat IP-nya publik (bukan 127.0.0.1, jaringan lokal, metadata cloud)."""
+    import ipaddress
+    import socket
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return False
+    try:
+        ip = {a[4][0] for a in socket.getaddrinfo(u.hostname, u.port or (443 if u.scheme == "https" else 80))}
+    except OSError:
+        return False
+    return bool(ip) and all(ipaddress.ip_address(x.split("%")[0]).is_global for x in ip)
+
+
+class _PengalihanAman(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not alamat_publik(newurl):
+            raise urllib.error.URLError("pengalihan ke alamat yang tidak diizinkan")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _sambung_publik(host: str, port: int, timeout) -> "socket.socket":
+    """Resolusi DNS dan pemeriksaan IP dilakukan tepat saat menyambung, lalu tersambung ke IP yang sudah
+    diperiksa itu (bukan resolusi ulang). Menutup celah DNS rebinding: nama yang lolos pemeriksaan tidak
+    bisa berganti menjadi 127.0.0.1 atau alamat jaringan lokal saat koneksi dibuat."""
+    import ipaddress
+    import socket
+    galat = None
+    for fam, tipe, proto, _, alamat in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        if not ipaddress.ip_address(alamat[0].split("%")[0]).is_global:
+            raise urllib.error.URLError("alamat tidak diizinkan")
+    for fam, tipe, proto, _, alamat in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        if not ipaddress.ip_address(alamat[0].split("%")[0]).is_global:
+            continue
+        s = socket.socket(fam, tipe, proto)
+        try:
+            s.settimeout(timeout if isinstance(timeout, (int, float)) else TIMEOUT)
+            s.connect(alamat)
+            return s
+        except OSError as e:
+            s.close()
+            galat = e
+    raise galat or urllib.error.URLError("alamat tidak bisa dihubungi")
+
+
+class _HttpPublik(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = _sambung_publik(self.host, self.port, self.timeout)
+
+
+class _HttpsPublik(http.client.HTTPSConnection):
+    def connect(self):
+        s = _sambung_publik(self.host, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(s, server_hostname=self.host)  # sertifikat tetap diperiksa untuk nama host
+
+
+class _HandlerHttp(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_HttpPublik, req)
+
+
+class _HandlerHttps(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_HttpsPublik, req, context=ssl.create_default_context())
+
+
+_PEMBUKA = urllib.request.build_opener(urllib.request.ProxyHandler({}), _HandlerHttp, _HandlerHttps, _PengalihanAman)
+
+
 def ambil(url: str, data: bytes | None = None, headers: dict | None = None) -> tuple[str, str]:
-    """Mengembalikan (url akhir, teks halaman)."""
+    """Mengembalikan (url akhir, teks halaman). Hanya alamat publik, juga setelah pengalihan."""
+    if not alamat_publik(url):
+        raise urllib.error.URLError("alamat tidak diizinkan")
     req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, "Accept-Language": "id,en;q=0.8", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _PEMBUKA.open(req, timeout=TIMEOUT) as r:
         mentah = r.read(3_000_000)
         cs = r.headers.get_content_charset() or "utf-8"
         return r.geturl(), mentah.decode(cs, errors="replace")
