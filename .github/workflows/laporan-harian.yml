@@ -6,10 +6,21 @@ on:
     # hari & jam yang dipilih di dashboard Pengaturan. Di luar jam itu, data isu
     # untuk Studio Konten diperbarui tanpa email bila sudah berumur 6 jam.
     - cron: "7 * * * *"
-  workflow_dispatch: # tombol "Run workflow" / "Kirim sekarang" = langsung kirim
+  workflow_dispatch: # tombol "Run workflow" / "Perbarui isu sekarang" di Studio Konten
+    inputs:
+      kirim_email:
+        description: "Kirim email laporan juga?"
+        type: choice
+        options: ["ya", "tidak"]
+        default: "ya"
 
 permissions:
   contents: write # untuk menyimpan data/isu-terbaru.json (dibaca Studio Konten)
+
+# Satu laporan pada satu waktu; permintaan berikutnya menunggu, tidak membatalkan yang berjalan
+concurrency:
+  group: laporan-isu
+  cancel-in-progress: false
 
 jobs:
   kirim-laporan:
@@ -27,6 +38,7 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           PENGATURAN: ${{ vars.PENGATURAN }}
+          KIRIM_EMAIL: ${{ github.event.inputs.kirim_email || 'ya' }}
         run: python laporan.py
       - name: Perkaya isu dengan isi artikel (bahan tulisan Studio Konten)
         if: steps.laporan.outputs.baru == 'true' # hanya bila ada data baru
